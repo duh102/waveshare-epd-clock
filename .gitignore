@@ -1,2 +1,5 @@
 *.pyc
 *.bmp
+*.png
+nohup.out
+.fonts

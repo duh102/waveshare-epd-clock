@@ -1,38 +1,68 @@
 #!/usr/bin/env python3
 from datetime import datetime, timedelta
-from waveshare_epd import epd4in2
 from PIL import Image,ImageDraw,ImageFont
 from pathlib import Path
-import time, sched, os
+import time, sched, os, argparse
 
-epd = epd4in2.EPD()
-epd.init()
+parser = argparse.ArgumentParser()
+parser.add_argument('--test', action='store_true', help='Run this as a test rather than the real thing')
+args = parser.parse_args()
 
-timeSizes = [128, 72, 48, 36, 24, 18, 12]
-timeSize = 0
+def displayToEPD(image, clearToo):
+    try:
+        from waveshare_epd import epd4in2
+        epd = epd4in2.EPD()
+        epd.init()
+        if(clearToo):
+            epd.Clear()
+        epd.display(epd.getbuffer(image))
+        epd.sleep()
+    except:
+        epd4in01f.epdconfig.module_exit()
 
-home = str(Path.home())
+def saveToFile(image):
+    image.save('test.png', 'PNG')
 
-fontName = os.path.join(home, '.fonts', 'trs-million rg.ttf')
-yearDayFontName = os.path.join(home, '.fonts', 'digital-7 (mono).ttf')
-timeFont = ImageFont.truetype(fontName, timeSizes[timeSize])
-yearDayFont = ImageFont.truetype(yearDayFontName, 30)
+dateFmt = '%A %b %d %Y'
+timeFmt = '%H:%M'
+epd_size = (400, 300)
 
-testString = '00:00'
-testWidth = int(epd.width * 0.8)
+home = os.path.join(str(Path.home()), '.fonts')
+curDir = os.path.join(os.path.abspath(os.path.dirname(__file__)), '.fonts')
 
-while timeFont.getsize(testString)[0] > testWidth:
-    if timeSize > len(timeSizes):
-        raise Exception('Can\'t fit {} into the test width {} :('.format(testString, testWidth))
-    timeSize+=1
-    timeFont = ImageFont.truetype(fontName, timeSizes[timeSize])
+def tryPath(filename):
+    for basePath in [home, curDir, '/usr/share/fonts/truetype', '/usr/share/fonts/opentype']:
+        trialPath = os.path.join(basePath, filename)
+        if os.path.isfile(trialPath):
+            return trialPath
+    return None
 
+def fitLargestFont(fontName, startSize, testString=None, maxHeight=None, maxWidth=None):
+    if testString is None:
+        testString = '00:00'
+    if maxHeight is None and maxWidth is None:
+        raise Exception('Must define at least one of maxHeight and maxWidth')
+    noneOrSmaller = lambda siz, limit: limit is None or siz < limit
+    size = startSize
+    imageFont = ImageFont.truetype(fontName, size)
+    while noneOrSmaller(imageFont.getsize(testString)[0], maxWidth) and noneOrSmaller(imageFont.getsize(testString)[1], maxHeight):
+        size = size+2
+        imageFont = ImageFont.truetype(fontName, size)
+    return imageFont
 
-# epd.GRAY1 is white
-# GRAY4 is black
-# GRAY 2 and 3 are increasingly dark
-# For B&W images, use mode '1'
-# For 4-color grayscale, use mode 'L'
+fontName = tryPath('trs-million rg.ttf')
+yearDayFontName = tryPath('digital-7 (mono).ttf')
+
+# 0s are usually the widest numeral in base-10
+testTimeString = '00:00'
+# a Thursday (longest day name) in a 4 digit year in September (longest month name) with a 2 digit date
+testDateString = datetime(2018, 9, 27).strftime(dateFmt)
+targetTimeSize = (int(epd_size[0]), int(epd_size[1]*0.6))
+targetDateSize = (int(epd_size[0]), int(epd_size[1]*0.4))
+
+timeFont = fitLargestFont(fontName, 10, testString=testTimeString, maxWidth=targetTimeSize[0], maxHeight=targetTimeSize[1])
+yearDayFont = fitLargestFont(yearDayFontName, 10, testString=testDateString, maxWidth=targetDateSize[0], maxHeight=targetDateSize[1])
+
 oneMinute = timedelta(minutes=1)
 scheduler = sched.scheduler()
 
@@ -43,37 +73,32 @@ def scheduleForNextMinute(function):
     scheduler.enter(toDelay.total_seconds(), 1, function)
 
 def drawTime():
-    timeImage = Image.new('1', (epd.width, epd.height), epd.GRAY1)
+    timeImage = Image.new('1', epd_size, 0xff)
     draw = ImageDraw.Draw(timeImage)
 
     now = datetime.now()
     # on the hour, flash the screen a few times to reduce ghosting
+    clearScreen = False
     if now.strftime('%M') == '00' or now.strftime('%M') == '30':
-        draw.rectangle((0,0,epd.width,epd.height), fill=0)
-        epd.display(epd.getbuffer(timeImage))
-        draw.rectangle((0,0,epd.width,epd.height), fill=epd.GRAY1)
-        epd.display(epd.getbuffer(timeImage))
+        clearScreen = True
     
     timeStr = now.strftime('%H:%M')
     timeStrSize = timeFont.getsize(timeStr)
-    timeOffsets = (int( (epd.width - timeStrSize[0])/2 ), int( (epd.height-timeStrSize[1])/2 ))
+    timeOffsets = (int( (epd_size[0] - timeStrSize[0])/2 ), 0)
     yearDayStr = now.strftime('%A %b %d %Y')
     yearStrSize = yearDayFont.getsize(yearDayStr)
-    yearOffsets = (int( (epd.width-yearStrSize[0])/2), int(timeOffsets[1]+timeStrSize[1]+20))
+    yearOffsets = (int( (epd_size[0]-yearStrSize[0])/2), int(epd_size[1]*0.95-yearStrSize[1]))
 
     draw.text(timeOffsets, timeStr, font=timeFont, fill=0)
     draw.text(yearOffsets, yearDayStr, font=yearDayFont, fill=0)
-    epd.display(epd.getbuffer(timeImage))
+    if args.test:
+        saveToFile(timeImage)
+    else:
+        displayToEPD(timeImage, clearScreen)
 
 def drawAndSchedule():
     drawTime()
     scheduleForNextMinute(drawAndSchedule)
-
-def notUsed():
-    epd.Init_4Gray()
-    Limage = Image.new('L', (epd.width, epd.height), 0)  # 255: clear the frame
-    draw = ImageDraw.Draw(Limage)
-    epd.display_4Gray(epd.getbuffer_4Gray(Limage))
 
 drawAndSchedule()
 scheduler.run()
