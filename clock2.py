@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 from PIL import Image,ImageDraw,ImageFont
 from pathlib import Path
-import time, sched, os, argparse
+import time, sched, os, argparse, traceback
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--test', action='store_true', help='Run this as a test rather than the real thing')
@@ -18,7 +18,8 @@ def displayToEPD(image, clearToo):
         epd.display(epd.getbuffer(image))
         epd.sleep()
     except:
-        epd4in01f.epdconfig.module_exit()
+        traceback.print_exc()
+        epd4in2.epdconfig.module_exit()
 
 def saveToFile(image):
     image.save('test.png', 'PNG')
@@ -63,9 +64,6 @@ targetDateSize = (int(epd_size[0]), int(epd_size[1]*0.4))
 timeFont = fitLargestFont(fontName, 10, testString=testTimeString, maxWidth=targetTimeSize[0], maxHeight=targetTimeSize[1])
 yearDayFont = fitLargestFont(yearDayFontName, 10, testString=testDateString, maxWidth=targetDateSize[0], maxHeight=targetDateSize[1])
 
-oneMinute = timedelta(minutes=1)
-scheduler = sched.scheduler()
-
 def scheduleForNextMinute(function):
     now = datetime.now()
     next = (now+oneMinute).replace(second=0, microsecond=0)
@@ -96,9 +94,4 @@ def drawTime():
     else:
         displayToEPD(timeImage, clearScreen)
 
-def drawAndSchedule():
-    drawTime()
-    scheduleForNextMinute(drawAndSchedule)
-
-drawAndSchedule()
-scheduler.run()
+drawTime()
